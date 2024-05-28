@@ -1,0 +1,193 @@
+%% BaselineCFDAC.m
+%
+%
+%
+%% Import data and compute autoCFDAC matrix 
+% Establish folder, parameters, reference part
+points = [1:2:41, 44:2:92, 95, 97 98 101 102 105 106 109 110 113 114 116, 119:2:141, 142 146 150, 154:2:188];
+fVec = [2.5:2.5:10000]; 
+ 
+datPathIn = 'data\raw\'; datRaw = string(ls(datPathIn)); datRaw(1:2) = [];
+datRaw = strtrim(datRaw); NInd = contains(datRaw,'PLA'); datNominal = datRaw(NInd); 
+RefPartNo = '28'; datRef = datNominal(contains(datNominal,RefPartNo)); datParts = datNominal(~contains(datNominal,RefPartNo));
+
+defParts = datRaw(contains(datRaw,'C'));
+
+RefPart = importdata('data\processed\parts\N28.mat'); 
+
+
+%% Reference part first
+tic
+part = strcat('N',RefPartNo);
+
+    % function [x,y,usd] = GetPointData(filename, domainname, channelname, signalname, displayname, point, frame)
+    [freq,FRF,info] = GetPointData(strcat(datPathIn,datRef),'FFT','Vib & Ref1','H1 Velocity / Voltage','Real & Imag.',0,0);
+    ind = interp1(freq,1:length(freq),fVec,'nearest'); 
+
+    dat.(part).H1 = zeros(length(points),length(ind)); dat.(part).H1 = FRF(points,ind);   
+    dat.(part).f = freq(ind); dat.(part).usd = info;  
+     
+   N = size(dat.(part).H1,2); dat.(part).autoCFDAC = zeros(N,N); dat.(part).refCFDAC = zeros(N,N);
+
+   for jj = 1:N
+        for kk = 1:N
+
+            dat.(part).autoCFDAC(jj,kk) = cMAC(dat.(part).H1(:,jj),dat.(part).H1(:,kk));   
+
+        end % (kk) 
+    end % (jj)
+
+    dat.(part).refCFDAC = dat.(part).autoCFDAC; % ONLY for reference part! 
+
+    saveNm = strcat('data\processed\parts\',string(part));
+    save(saveNm,'-struct','dat')
+
+toc
+clear part freq FRF info ind xx dat saveNm N xx jj kk
+
+%%  NOMINAL PARTS
+% RefPart = importdata('data\processed\parts\N28.mat'); 
+
+tic
+ii = 1;
+for fNm = datParts.' % datParts = just Nominal parts
+
+    p = strsplit(fNm,' '); n = regexp(p(2),'\d*','match'); part = strcat('N',n); 
+    
+    % function [x,y,usd] = GetPointData(filename, domainname, channelname, signalname, displayname, point, frame)
+    [freq,FRF,info] = GetPointData(strcat(datPathIn,fNm),'FFT','Vib & Ref1','H1 Velocity / Voltage','Real & Imag.',0,0);
+    ind = interp1(freq,1:length(freq),fVec,'nearest'); 
+
+    dat.(part).H1 = zeros(length(points),length(ind)); dat.(part).H1 = FRF(points,ind); 
+    dat.(part).f = freq(ind); dat.(part).usd = info;  
+    clear freq FRF info ind xx
+
+    N = size(dat.(part).H1,2); dat.(part).autoCFDAC = zeros(N,N); dat.(part).refCFDAC = zeros(N,N);
+
+    for jj = 1:N
+        for kk = 1:N
+
+            dat.(part).autoCFDAC(jj,kk) = cMAC(dat.(part).H1(:,jj),dat.(part).H1(:,kk));   
+            dat.(part).refCFDAC(jj,kk) = cMAC(dat.(part).H1(:,jj),RefPart.H1(:,kk));   
+
+        end % (kk) 
+    end % (jj)
+ 
+    RowNm(ii) = part; 
+        % function [M, RE, MRE, IM, MIM] = evalComplexDamageIndices(datRef,datAlt,datRefvsAlt)
+        % function out = evalDamageIndices(dat1,dat2,dat1v2) 
+            % dat1 = FDAC matrix of dat1 v. dat1
+            % dat2 = reference part: FDAC matrix of dat2 v. dat2
+            % dat1v2 = FDAC matrix of dat1 v. dat2
+       [M, RE, MRE, IM, MIM] = evalComplexDamageIndices(RefPart.autoCFDAC,dat.(part).autoCFDAC,dat.(part).refCFDAC);
+       Mmat(ii,:) = [M.SumNvN M.AvgValNvN M.SumRefvN M.AvgValRefvN M.DRQ M.invDRQ M.SymQ M.invSymQ M.PCC M.SCI];
+       REmat(ii,:) = [RE.SumNvN RE.AvgValNvN RE.SumRefvN RE.AvgValRefvN RE.DRQ RE.invDRQ RE.SymQ RE.invSymQ RE.PCC RE.SCI];
+       IMmat(ii,:) = [IM.SumNvN IM.AvgValNvN IM.SumRefvN IM.AvgValRefvN IM.DRQ IM.invDRQ IM.SymQ IM.invSymQ IM.PCC IM.SCI];
+       MREmat(ii,:) = [MRE.SumNvN MRE.AvgValNvN MRE.SumRefvN MRE.AvgValRefvN MRE.DRQ MRE.invDRQ MRE.SymQ MRE.invSymQ];
+       MIMmat(ii,:) = [MIM.SumNvN MIM.AvgValNvN MIM.SumRefvN MIM.AvgValRefvN MIM.DRQ MIM.invDRQ MIM.SymQ MIM.invSymQ];
+       PCCmat(ii,:) = [RE.PCC IM.PCC M.PCC RE.SCI IM.SCI M.SCI];
+    
+    ii = ii + 1;
+
+    saveNm = strcat('data\processed\parts\',string(part));
+    save(saveNm,'-struct','dat')
+    
+    clear dat part jj kk freq FRF N p saveNm M RE MRE IM MIM dat
+
+end % (fNm)
+
+toc 
+
+VarNms1 = ["Sum: N vs. N", "Avg. Value: N vs. N","Sum: Ref. vs. N","Avg. Value: Ref. vs. N","DRQ",...
+    "Inverse DRQ","Symmetry Quotient","Inverse Symmetry Quotient","PCC", "SCI"];
+VarNms2 = VarNms1(1:length(VarNms1)-2); 
+VarNms3 = ["PCC: Real","PCC: Imag.","PCC: Mag.","SCI: Real","SCI: Imag.","SCI: Mag."];
+
+xlFNm = 'piss_Rat_XL.xlsx';
+
+TM = array2table(round(Mmat,5),'RowNames',RowNm','VariableNames',VarNms1); writetable(TM,xlFNm,'Sheet','Magnitude','WriteRowNames',true)
+TRE = array2table(round(REmat,5),'RowNames',RowNm','VariableNames',VarNms1); writetable(TRE,xlFNm,'Sheet','Real','WriteRowNames',true)
+TMRE = array2table(round(MREmat,5),'RowNames',RowNm','VariableNames',VarNms2); writetable(TMRE,xlFNm,'Sheet','|REAL|','WriteRowNames',true) 
+TIM = array2table(round(IMmat,5),'RowNames',RowNm','VariableNames',VarNms1); writetable(TIM,xlFNm,'Sheet','Imaginary','WriteRowNames',true)
+TMIM = array2table(round(MIMmat,5),'RowNames',RowNm','VariableNames',VarNms2); writetable(TMIM,xlFNm,'Sheet','|IMAGINARY|','WriteRowNames',true)
+TPCC = array2table(round(PCCmat,5),'RowNames',RowNm','VariableNames',VarNms3); writetable(TPCC,xlFNm,'Sheet','PCC | SCI','WriteRowNames',true)
+
+save('data\Metrics.mat','TM','TRE','TMRE','TIM','TMIM','TPCC','RowNm')
+
+% clear x ii VarNms1 VarNms2 Mmat REmat IMmat MREmat MIMmat PCCmat 
+
+%% DEFECT PARTS
+% C1c3, C1b3, C1a3, SC1c3, SC1b3, SC1a3
+clear fNm p part freq FRF info dat jj kk 
+tic
+for fNm = defParts.'
+
+    p = strsplit(fNm,' '); part = p(2); 
+    
+    % function [x,y,usd] = GetPointData(filename, domainname, channelname, signalname, displayname, point, frame)
+    [freq,FRF,info] = GetPointData(strcat(datPathIn,fNm),'FFT','Vib & Ref1','H1 Velocity / Voltage','Real & Imag.',0,0);
+    ind = interp1(freq,1:length(freq),fVec,'nearest'); 
+
+    dat.(part).H1 = zeros(length(points),length(ind)); dat.(part).H1 = FRF(points,ind); 
+    dat.(part).f = freq(ind); dat.(part).usd = info;  
+    clear freq FRF info ind xx
+
+    N = size(dat.(part).H1,2); dat.(part).autoCFDAC = zeros(N,N); dat.(part).refCFDAC = zeros(N,N);
+
+    for jj = 1:N
+        for kk = 1:N
+
+            dat.(part).autoCFDAC(jj,kk) = cMAC(dat.(part).H1(:,jj),dat.(part).H1(:,kk));   
+            dat.(part).refCFDAC(jj,kk) = cMAC(RefPart.H1(:,jj),dat.(part).H1(:,kk));   
+
+        end % (kk) 
+    end % (jj)
+ 
+    saveNm = strcat('data\processed\defects\',string(part));
+    save(saveNm,'-struct','dat')
+    
+    clear dat part jj kk freq FRF N p saveNm
+
+end % (fNm)
+
+toc
+
+
+%% Colormaps
+% function CFDACcolorap(f,CFDACmat)
+
+datPlt = string(ls('data\processed\defects\')); datPlt(1:2) = [];
+datPlt = strtrim(datPlt)
+
+for fNm = datPlt.'
+
+    dat = load(strcat('data\processed\defects\',fNm))
+    x = erase(fNm,'.mat'); 
+
+    H = CFDACcolormap(dat.(x).f,dat.(x).refCFDAC)
+
+    saveGraphicsNm = strcat('figures\CFDACsubplots_RefN28_vs_',x,'_','2.5-10000Hz_jet20.png')
+    exportgraphics(H,saveGraphicsNm)
+
+    clear dat x  H saveNm saveGraphicsNm
+
+end 
+
+H = CFDACcolormap(RefPart.f,RefPart.f,RefPart.refCFDAC)
+
+    saveGraphicsNm = 'figures\CFDACsubplots_RefN28_vs_',x,'_','2.5-10000Hz_jet20.png')
+    exportgraphics(H,saveGraphicsNm)
+
+%% 
+
+
+
+
+
+
+
+
+
+
+
+
